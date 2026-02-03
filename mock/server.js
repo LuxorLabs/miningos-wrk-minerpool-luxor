@@ -69,19 +69,22 @@ function createServer (argv) {
 }
 
 function createInitialState (ctx) {
+  const currencyType = 'BTC'
   const workers = []
   for (let i = 0; i < 10; i++) {
+    const workerName = `miner${i}`
     workers.push({
-      id: `worker-${i}`,
-      name: `miner${i}`,
+      currency_type: currencyType,
+      id: `${currencyType}-${ctx.subaccounts[0]}-${workerName}`,
       subaccount_name: ctx.subaccounts[0],
-      status: i < 8 ? 'ACTIVE' : 'INACTIVE',
-      last_share_time: new Date().toISOString(),
+      name: workerName,
+      firmware: 'LuxOS',
       hashrate: i < 8 ? 100000000000 + Math.random() * 10000000000 : 0,
       efficiency: i < 8 ? 0.98 + Math.random() * 0.02 : 0,
       stale_shares: Math.random() * 0.02,
       rejected_shares: Math.random() * 0.01,
-      firmware: '1.0.0'
+      last_share_time: new Date().toISOString(),
+      status: i < 8 ? 'ACTIVE' : 'INACTIVE'
     })
   }
 
@@ -89,7 +92,7 @@ function createInitialState (ctx) {
     subaccounts: ctx.subaccounts.map((name, i) => ({
       id: i + 1,
       name,
-      site: null
+      site: i === 0 ? null : { id: `site-${i}`, name: `Site ${i}` }
     })),
     workers,
     transactions: generateTransactions(ctx.subaccounts[0]),
@@ -99,8 +102,8 @@ function createInitialState (ctx) {
       efficiency_5m: 0.99,
       uptime_24h: 0.995,
       active_miners: 8,
-      revenue_24h: [{ revenue_type: 'MINING', currency_type: 'BTC', revenue: 0.01 }],
-      revenue_all_time: [{ revenue_type: 'MINING', currency_type: 'BTC', revenue: 1.5 }],
+      revenue_24h: [{ currency_type: 'BTC', revenue_type: 'MINING', revenue: 0.01 }],
+      revenue_all_time: [{ currency_type: 'BTC', revenue_type: 'MINING', revenue: 1.5 }],
       balance: [{ currency_type: 'BTC', revenue: 0.5 }],
       hashprice: [{ currency_type: 'BTC', value: 0.00059 }]
     }
@@ -187,17 +190,18 @@ function registerRoutes (app) {
 
     const totalActive = req.state.workers.filter(w => w.status === 'ACTIVE').length
     const totalInactive = req.state.workers.filter(w => w.status === 'INACTIVE').length
+    const totalWorkers = workers.length
 
     res.send({
       currency_type: req.params.currency_type,
       subaccounts: req.state.subaccounts,
-      total_active: totalActive,
       total_inactive: totalInactive,
+      total_active: totalActive,
       workers: pagedWorkers,
       pagination: {
         page_number: pageNumber,
         page_size: pageSize,
-        item_count: pagedWorkers.length,
+        item_count: totalWorkers,
         previous_page_url: pageNumber > 1 ? `/v2/pool/workers/${req.params.currency_type}?page_number=${pageNumber - 1}` : null,
         next_page_url: end < workers.length ? `/v2/pool/workers/${req.params.currency_type}?page_number=${pageNumber + 1}` : null
       }
@@ -258,23 +262,31 @@ function registerRoutes (app) {
       })
     }
 
+    // Generate efficiency data points
+    const efficiencyData = []
+    const startDate = new Date(req.query.start_date)
+    const endDate = new Date(req.query.end_date)
+    const dayMs = 24 * 60 * 60 * 1000
+
+    for (let d = new Date(startDate); d <= endDate; d = new Date(d.getTime() + dayMs)) {
+      efficiencyData.push({
+        date_time: d.toISOString(),
+        hashrate: String(800000000000000 + Math.random() * 100000000000000),
+        efficiency: 0.99 + Math.random() * 0.01
+      })
+    }
+
     res.send({
       currency_type: req.params.currency_type,
       start_date: req.query.start_date,
       end_date: req.query.end_date,
       tick_size: req.query.tick_size,
       subaccounts: req.state.subaccounts,
-      hashrate_efficiency: [
-        {
-          date_time: new Date().toISOString(),
-          hashrate: '800000000000000',
-          efficiency: 0.99
-        }
-      ],
+      hashrate_efficiency: efficiencyData,
       pagination: {
         page_number: 1,
         page_size: 10,
-        item_count: 1,
+        item_count: efficiencyData.length,
         previous_page_url: null,
         next_page_url: null
       }
@@ -294,22 +306,30 @@ function registerRoutes (app) {
       })
     }
 
+    // Generate uptime data points
+    const uptimeData = []
+    const startDate = new Date(req.query.start_date)
+    const endDate = new Date(req.query.end_date)
+    const dayMs = 24 * 60 * 60 * 1000
+
+    for (let d = new Date(startDate); d <= endDate; d = new Date(d.getTime() + dayMs)) {
+      uptimeData.push({
+        date_time: d.toISOString(),
+        uptime: 0.95 + Math.random() * 0.05
+      })
+    }
+
     res.send({
       currency_type: req.params.currency_type,
       start_date: req.query.start_date,
       end_date: req.query.end_date,
       tick_size: req.query.tick_size,
       subaccounts: req.state.subaccounts,
-      uptime: [
-        {
-          date_time: new Date().toISOString(),
-          uptime: 0.995
-        }
-      ],
+      uptime: uptimeData,
       pagination: {
         page_number: 1,
         page_size: 10,
-        item_count: 1,
+        item_count: uptimeData.length,
         previous_page_url: null,
         next_page_url: null
       }

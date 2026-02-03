@@ -12,15 +12,24 @@
  *   LUXOR_API_URL    - API base URL (default: https://app.luxor.tech/api)
  *   LUXOR_CURRENCY   - Currency type (default: BTC)
  *   LUXOR_SUBACCOUNT - Subaccount name (optional)
+ *
+ * Output:
+ *   Saves raw API response snapshots to tests/snapshots/
  */
 
+const fs = require('fs')
+const path = require('path')
 const { LuxorMinerPool } = require('../workers/lib/luxor.minerpool')
 const { getWorkersStats, formatDateForApi } = require('../workers/lib/utils')
 
-// Simple HTTP client wrapper for standalone testing
+// Snapshot directory
+const SNAPSHOTS_DIR = path.join(__dirname, '..', 'tests', 'snapshots')
+
+// Simple HTTP client wrapper that captures raw responses
 class SimpleHttpClient {
   constructor (baseUrl) {
     this.baseUrl = baseUrl
+    this.rawResponses = []
   }
 
   async get (path, options = {}) {
@@ -35,6 +44,13 @@ class SimpleHttpClient {
 
     const body = await response.json()
 
+    // Capture raw response for snapshots
+    this.rawResponses.push({
+      path,
+      status: response.status,
+      body
+    })
+
     if (!response.ok) {
       console.error(`✗ HTTP ${response.status}: ${JSON.stringify(body)}`)
       throw new Error(`HTTP ${response.status}: ${body.message || 'Unknown error'}`)
@@ -43,6 +59,27 @@ class SimpleHttpClient {
     console.log(`✓ HTTP ${response.status}`)
     return { body }
   }
+
+  getRawResponses () {
+    return this.rawResponses
+  }
+
+  clearResponses () {
+    this.rawResponses = []
+  }
+}
+
+function ensureSnapshotsDir () {
+  if (!fs.existsSync(SNAPSHOTS_DIR)) {
+    fs.mkdirSync(SNAPSHOTS_DIR, { recursive: true })
+  }
+}
+
+function saveSnapshot (name, data) {
+  ensureSnapshotsDir()
+  const filePath = path.join(SNAPSHOTS_DIR, `${name}.json`)
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
+  console.log(`  📸 Snapshot saved: tests/snapshots/${name}.json`)
 }
 
 async function runTests () {
@@ -69,6 +106,7 @@ async function runTests () {
   console.log(`API URL:    ${apiUrl}`)
   console.log(`Currency:   ${currencyType}`)
   console.log(`Subaccount: ${subaccountName || '(all)'}`)
+  console.log(`Snapshots:  ${SNAPSHOTS_DIR}`)
   console.log('='.repeat(60))
 
   const http = new SimpleHttpClient(apiUrl)
@@ -79,35 +117,41 @@ async function runTests () {
 
   const queryOptions = subaccountName ? { subaccountNames: [subaccountName] } : {}
   const results = {}
+  const snapshots = {}
 
   // Test 1: Get Summary
   console.log('\n' + '─'.repeat(60))
   console.log('TEST 1: Get Summary')
   console.log('─'.repeat(60))
   try {
+    http.clearResponses()
     const summary = await client.getSummary(queryOptions)
     results.summary = summary
+    snapshots.summary = http.getRawResponses()[0]?.body
+    saveSnapshot('summary', snapshots.summary)
 
-    console.log('\nResponse:')
-    console.log(`  Hashrate (5m):     ${summary.hashrate_5m || 'N/A'}`)
-    console.log(`  Hashrate (24h):    ${summary.hashrate_24h || 'N/A'}`)
-    console.log(`  Efficiency (5m):   ${summary.efficiency_5m || 'N/A'}`)
-    console.log(`  Uptime (24h):      ${summary.uptime_24h || 'N/A'}`)
-    console.log(`  Active Miners:     ${summary.active_miners || 'N/A'}`)
-    console.log(`  Subaccounts:       ${summary.subaccounts?.length || 0}`)
+    console.log('\nResponse Structure:')
+    console.log(`  hashrate_5m:       ${typeof summary.hashrate_5m} = ${summary.hashrate_5m}`)
+    console.log(`  hashrate_24h:      ${typeof summary.hashrate_24h} = ${summary.hashrate_24h}`)
+    console.log(`  efficiency_5m:     ${typeof summary.efficiency_5m} = ${summary.efficiency_5m}`)
+    console.log(`  uptime_24h:        ${typeof summary.uptime_24h} = ${summary.uptime_24h}`)
+    console.log(`  active_miners:     ${typeof summary.active_miners} = ${summary.active_miners}`)
+    console.log(`  revenue_24h:       ${Array.isArray(summary.revenue_24h) ? 'array' : typeof summary.revenue_24h}[${summary.revenue_24h?.length}]`)
+    console.log(`  revenue_all_time:  ${Array.isArray(summary.revenue_all_time) ? 'array' : typeof summary.revenue_all_time}[${summary.revenue_all_time?.length}]`)
+    console.log(`  balance:           ${Array.isArray(summary.balance) ? 'array' : typeof summary.balance}[${summary.balance?.length}]`)
+    console.log(`  hashprice:         ${Array.isArray(summary.hashprice) ? 'array' : typeof summary.hashprice}[${summary.hashprice?.length}]`)
+    console.log(`  subaccounts:       ${Array.isArray(summary.subaccounts) ? 'array' : typeof summary.subaccounts}[${summary.subaccounts?.length}]`)
 
-    if (summary.revenue_24h) {
-      console.log('  Revenue (24h):')
-      summary.revenue_24h.forEach(r => {
-        console.log(`    - ${r.revenue_type}: ${r.revenue} ${r.currency_type}`)
-      })
+    if (summary.revenue_24h?.length > 0) {
+      console.log('\n  revenue_24h[0] structure:')
+      const r = summary.revenue_24h[0]
+      Object.keys(r).forEach(k => console.log(`    ${k}: ${typeof r[k]} = ${r[k]}`))
     }
 
-    if (summary.balance) {
-      console.log('  Balance:')
-      summary.balance.forEach(b => {
-        console.log(`    - ${b.currency_type}: ${b.revenue}`)
-      })
+    if (summary.balance?.length > 0) {
+      console.log('\n  balance[0] structure:')
+      const b = summary.balance[0]
+      Object.keys(b).forEach(k => console.log(`    ${k}: ${typeof b[k]} = ${b[k]}`))
     }
 
     console.log('\n✓ Summary test PASSED')
@@ -121,31 +165,31 @@ async function runTests () {
   console.log('TEST 2: Get Workers (first page)')
   console.log('─'.repeat(60))
   try {
+    http.clearResponses()
     const workersResult = await client.getWorkers({ ...queryOptions, pageSize: 5 })
     results.workers = workersResult
+    snapshots.workers = http.getRawResponses()[0]?.body
+    saveSnapshot('workers', snapshots.workers)
 
-    console.log('\nResponse:')
-    console.log(`  Total Active:      ${workersResult.total_active || 0}`)
-    console.log(`  Total Inactive:    ${workersResult.total_inactive || 0}`)
-    console.log(`  Workers returned:  ${workersResult.workers?.length || 0}`)
-    console.log(`  Has next page:     ${!!workersResult.pagination?.next_page_url}`)
+    console.log('\nResponse Structure:')
+    console.log(`  total_active:      ${typeof workersResult.total_active} = ${workersResult.total_active}`)
+    console.log(`  total_inactive:    ${typeof workersResult.total_inactive} = ${workersResult.total_inactive}`)
+    console.log(`  workers:           array[${workersResult.workers?.length}]`)
+    console.log(`  pagination:        ${typeof workersResult.pagination}`)
 
     if (workersResult.workers?.length > 0) {
-      console.log('\n  Sample Worker:')
+      console.log('\n  workers[0] structure:')
       const w = workersResult.workers[0]
-      console.log(`    ID:              ${w.id}`)
-      console.log(`    Name:            ${w.name}`)
-      console.log(`    Subaccount:      ${w.subaccount_name}`)
-      console.log(`    Status:          ${w.status}`)
-      console.log(`    Hashrate:        ${w.hashrate}`)
-      console.log(`    Efficiency:      ${w.efficiency}`)
-      console.log(`    Last Share:      ${w.last_share_time}`)
+      Object.keys(w).forEach(k => console.log(`    ${k}: ${typeof w[k]} = ${JSON.stringify(w[k]).substring(0, 50)}`))
 
-      // Test transformation
-      console.log('\n  Transformed Worker (MiningOS format):')
+      console.log('\n  Transformed (MiningOS format):')
       const transformed = getWorkersStats([w])
-      console.log(`    online:          ${transformed[0].online}`)
-      console.log(`    last_updated:    ${transformed[0].last_updated}`)
+      Object.keys(transformed[0]).forEach(k => console.log(`    ${k}: ${typeof transformed[0][k]} = ${transformed[0][k]}`))
+    }
+
+    if (workersResult.pagination) {
+      console.log('\n  pagination structure:')
+      Object.keys(workersResult.pagination).forEach(k => console.log(`    ${k}: ${workersResult.pagination[k]}`))
     }
 
     console.log('\n✓ Workers test PASSED')
@@ -159,6 +203,7 @@ async function runTests () {
   console.log('TEST 3: Get Transactions (last 7 days)')
   console.log('─'.repeat(60))
   try {
+    http.clearResponses()
     const endDate = new Date()
     const startDate = new Date(endDate.getTime() - 7 * 24 * 60 * 60 * 1000)
 
@@ -169,21 +214,17 @@ async function runTests () {
       pageSize: 5
     })
     results.transactions = transactions
+    snapshots.transactions = http.getRawResponses()[0]?.body
+    saveSnapshot('transactions', snapshots.transactions)
 
-    console.log('\nResponse:')
-    console.log(`  Transactions:      ${transactions.transactions?.length || 0}`)
-    console.log(`  Has next page:     ${!!transactions.pagination?.next_page_url}`)
+    console.log('\nResponse Structure:')
+    console.log(`  transactions:      array[${transactions.transactions?.length}]`)
+    console.log(`  pagination:        ${typeof transactions.pagination}`)
 
     if (transactions.transactions?.length > 0) {
-      console.log('\n  Sample Transaction:')
+      console.log('\n  transactions[0] structure:')
       const tx = transactions.transactions[0]
-      console.log(`    ID:              ${tx.transaction_id}`)
-      console.log(`    Type:            ${tx.transaction_type}`)
-      console.log(`    Category:        ${tx.transaction_category}`)
-      console.log(`    Amount:          ${tx.currency_amount} ${tx.currency_type}`)
-      console.log(`    USD Equivalent:  $${tx.usd_equivalent}`)
-      console.log(`    Date:            ${tx.date_time}`)
-      console.log(`    Subaccount:      ${tx.subaccount_name}`)
+      Object.keys(tx).forEach(k => console.log(`    ${k}: ${typeof tx[k]} = ${JSON.stringify(tx[k]).substring(0, 50)}`))
     }
 
     console.log('\n✓ Transactions test PASSED')
@@ -197,14 +238,14 @@ async function runTests () {
   console.log('TEST 4: Get Pool Hashrate')
   console.log('─'.repeat(60))
   try {
+    http.clearResponses()
     const poolHashrate = await client.getPoolHashrate(queryOptions)
     results.poolHashrate = poolHashrate
+    snapshots.poolHashrate = http.getRawResponses()[0]?.body
+    saveSnapshot('pool-hashrate', snapshots.poolHashrate)
 
-    console.log('\nResponse:')
-    console.log(JSON.stringify(poolHashrate, null, 2).split('\n').slice(0, 20).join('\n'))
-    if (Object.keys(poolHashrate).length > 10) {
-      console.log('  ... (truncated)')
-    }
+    console.log('\nResponse Structure:')
+    Object.keys(poolHashrate).forEach(k => console.log(`  ${k}: ${typeof poolHashrate[k]} = ${poolHashrate[k]}`))
 
     console.log('\n✓ Pool Hashrate test PASSED')
   } catch (e) {
@@ -217,6 +258,7 @@ async function runTests () {
   console.log('TEST 5: Get Hashrate Efficiency (last 7 days)')
   console.log('─'.repeat(60))
   try {
+    http.clearResponses()
     const endDate = new Date()
     const startDate = new Date(endDate.getTime() - 7 * 24 * 60 * 60 * 1000)
 
@@ -227,11 +269,16 @@ async function runTests () {
       tickSize: '1d'
     })
     results.efficiency = efficiency
+    snapshots.efficiency = http.getRawResponses()[0]?.body
+    saveSnapshot('hashrate-efficiency', snapshots.efficiency)
 
-    console.log('\nResponse:')
-    console.log(JSON.stringify(efficiency, null, 2).split('\n').slice(0, 20).join('\n'))
-    if (JSON.stringify(efficiency).length > 500) {
-      console.log('  ... (truncated)')
+    console.log('\nResponse Structure:')
+    console.log(`  hashrate_efficiency: array[${efficiency.hashrate_efficiency?.length}]`)
+
+    if (efficiency.hashrate_efficiency?.length > 0) {
+      console.log('\n  hashrate_efficiency[0] structure:')
+      const e = efficiency.hashrate_efficiency[0]
+      Object.keys(e).forEach(k => console.log(`    ${k}: ${typeof e[k]} = ${e[k]}`))
     }
 
     console.log('\n✓ Hashrate Efficiency test PASSED')
@@ -245,6 +292,7 @@ async function runTests () {
   console.log('TEST 6: Get Uptime (last 7 days)')
   console.log('─'.repeat(60))
   try {
+    http.clearResponses()
     const endDate = new Date()
     const startDate = new Date(endDate.getTime() - 7 * 24 * 60 * 60 * 1000)
 
@@ -255,11 +303,16 @@ async function runTests () {
       tickSize: '1d'
     })
     results.uptime = uptime
+    snapshots.uptime = http.getRawResponses()[0]?.body
+    saveSnapshot('uptime', snapshots.uptime)
 
-    console.log('\nResponse:')
-    console.log(JSON.stringify(uptime, null, 2).split('\n').slice(0, 20).join('\n'))
-    if (JSON.stringify(uptime).length > 500) {
-      console.log('  ... (truncated)')
+    console.log('\nResponse Structure:')
+    console.log(`  uptime: array[${uptime.uptime?.length}]`)
+
+    if (uptime.uptime?.length > 0) {
+      console.log('\n  uptime[0] structure:')
+      const u = uptime.uptime[0]
+      Object.keys(u).forEach(k => console.log(`    ${k}: ${typeof u[k]} = ${u[k]}`))
     }
 
     console.log('\n✓ Uptime test PASSED')
@@ -268,12 +321,38 @@ async function runTests () {
     results.uptime = { error: e.message }
   }
 
+  // Test 7: Get Subaccounts
+  console.log('\n' + '─'.repeat(60))
+  console.log('TEST 7: Get Subaccounts')
+  console.log('─'.repeat(60))
+  try {
+    http.clearResponses()
+    const subaccounts = await client.getSubaccounts()
+    results.subaccounts = subaccounts
+    snapshots.subaccounts = http.getRawResponses()[0]?.body
+    saveSnapshot('subaccounts', snapshots.subaccounts)
+
+    console.log('\nResponse Structure:')
+    console.log(`  subaccounts: array[${subaccounts.subaccounts?.length}]`)
+
+    if (subaccounts.subaccounts?.length > 0) {
+      console.log('\n  subaccounts[0] structure:')
+      const s = subaccounts.subaccounts[0]
+      Object.keys(s).forEach(k => console.log(`    ${k}: ${typeof s[k]} = ${s[k]}`))
+    }
+
+    console.log('\n✓ Subaccounts test PASSED')
+  } catch (e) {
+    console.error(`\n✗ Subaccounts test FAILED: ${e.message}`)
+    results.subaccounts = { error: e.message }
+  }
+
   // Summary
   console.log('\n' + '='.repeat(60))
   console.log('TEST SUMMARY')
   console.log('='.repeat(60))
 
-  const tests = ['summary', 'workers', 'transactions', 'poolHashrate', 'efficiency', 'uptime']
+  const tests = ['summary', 'workers', 'transactions', 'poolHashrate', 'efficiency', 'uptime', 'subaccounts']
   let passed = 0
   let failed = 0
 
@@ -292,13 +371,9 @@ async function runTests () {
   console.log(`Results: ${passed} passed, ${failed} failed`)
   console.log('='.repeat(60))
 
-  // Save full response for debugging
-  if (process.env.DEBUG) {
-    const fs = require('fs')
-    const outputPath = '/tmp/luxor-api-test-results.json'
-    fs.writeFileSync(outputPath, JSON.stringify(results, null, 2))
-    console.log(`\nFull responses saved to: ${outputPath}`)
-  }
+  // Save combined snapshot
+  saveSnapshot('all-responses', snapshots)
+  console.log('\n✓ All snapshots saved to tests/snapshots/')
 
   process.exit(failed > 0 ? 1 : 0)
 }
