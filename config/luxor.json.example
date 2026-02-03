@@ -1,0 +1,8 @@
+{
+  "apiUrl": "https://app.luxor.tech/api",
+  "apiKey": "your-luxor-api-key",
+  "currencyType": "BTC",
+  "subaccountNames": ["your-subaccount-name"],
+  "siteId": null,
+  "pageSize": 100
+}
