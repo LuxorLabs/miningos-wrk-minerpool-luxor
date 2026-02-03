@@ -4,5 +4,7 @@
   "currencyType": "BTC",
   "subaccountNames": ["your-subaccount-name"],
   "siteId": null,
-  "pageSize": 100
+  "pageSize": 100,
+  "yearlyBalancesRefreshCurrentMs": 60000,
+  "yearlyBalancesRefreshFullMs": 86400000
 }

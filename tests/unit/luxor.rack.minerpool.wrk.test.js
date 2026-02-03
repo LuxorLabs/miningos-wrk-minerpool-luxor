@@ -2,7 +2,8 @@
 
 const test = require('brittle')
 const WrkMinerPoolRackLuxor = require('../../workers/luxor.rack.minerpool.wrk')
-const { SCHEDULER_TIMES, POOL_TYPE } = require('../../workers/lib/constants')
+const { SCHEDULER_TIMES, POOL_TYPE, TRANSACTION_TYPES } = require('../../workers/lib/constants')
+const { getMonthlyDateRanges } = require('../../workers/lib/utils')
 
 const mockTetherWrkBase = {
   init: function () {},
@@ -32,6 +33,11 @@ function createMockWorker (conf, ctx) {
   worker.subaccountNames = worker.conf.luxor.subaccountNames
   worker.siteId = worker.conf.luxor.siteId
   worker.pageSize = worker.conf.luxor.pageSize
+  worker.yearlyBalancesRefreshCurrentMs = worker.conf.luxor.yearlyBalancesRefreshCurrentMs || 60000
+  worker.yearlyBalancesRefreshFullMs = worker.conf.luxor.yearlyBalancesRefreshFullMs || 24 * 60 * 60 * 1000
+  worker._yearlyBalancesLastCurrentRefresh = 0
+  worker._yearlyBalancesLastFullRefresh = 0
+  worker._yearlyBalancesRefreshing = false
   worker.data = {
     statsData: {},
     workersData: { ts: 0, workers: [] },
@@ -318,6 +324,65 @@ test('WrkMinerPoolRackLuxor: _extractHashprice should extract hashprice for curr
 
   const result = worker._extractHashprice(hashpriceArray)
   t.is(result, 0.00059)
+})
+
+test('WrkMinerPoolRackLuxor: getYearlyBalances should refresh current month only', async (t) => {
+  const worker = createMockWorker()
+  const now = new Date()
+  const currentKey = `${now.getMonth() + 1}-${now.getFullYear()}`
+  const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const prevKey = `${prevDate.getMonth() + 1}-${prevDate.getFullYear()}`
+
+  worker.data.yearlyBalances = { [prevKey]: 1.23 }
+  worker.yearlyBalancesRefreshCurrentMs = 0
+
+  const calls = []
+  worker.luxorApi.getAllTransactions = async (opts) => {
+    calls.push(opts)
+    return [{ currency_amount: 0.5 }]
+  }
+
+  const result = await worker.getYearlyBalances({ currentOnly: true })
+
+  t.is(calls.length, 1)
+  t.is(calls[0].transactionType, TRANSACTION_TYPES.CREDIT)
+  t.ok(result.find(r => r.month === currentKey))
+  t.is(worker.data.yearlyBalances[prevKey], 1.23)
+})
+
+test('WrkMinerPoolRackLuxor: getYearlyBalances should honor current refresh TTL', async (t) => {
+  const worker = createMockWorker()
+  const calls = []
+  worker.luxorApi.getAllTransactions = async (opts) => {
+    calls.push(opts)
+    return [{ currency_amount: 0.5 }]
+  }
+
+  worker.yearlyBalancesRefreshCurrentMs = 60 * 1000
+  worker._yearlyBalancesLastCurrentRefresh = Date.now()
+
+  await worker.getYearlyBalances({ currentOnly: true })
+  t.is(calls.length, 0)
+})
+
+test('WrkMinerPoolRackLuxor: getYearlyBalances full refresh should reuse cached non-current months', async (t) => {
+  const worker = createMockWorker()
+  const ranges = getMonthlyDateRanges(12)
+  worker.data.yearlyBalances = Object.keys(ranges).reduce((acc, key) => {
+    acc[key] = 1
+    return acc
+  }, {})
+
+  const calls = []
+  worker.luxorApi.getAllTransactions = async (opts) => {
+    calls.push(opts)
+    return [{ currency_amount: 0.5 }]
+  }
+
+  worker.yearlyBalancesRefreshFullMs = 0
+  await worker.getYearlyBalances({ currentOnly: false, force: true })
+
+  t.is(calls.length, 1)
 })
 
 test('WrkMinerPoolRackLuxor: _aggrTransactions should aggregate transactions correctly', (t) => {

@@ -27,6 +27,8 @@ cp config/common.json.example config/common.json
 | `subaccountNames` | string[] | Optional list of subaccount names to filter |
 | `siteId` | string | Optional site ID to filter |
 | `pageSize` | number | Page size for paginated requests (default: 100) |
+| `yearlyBalancesRefreshCurrentMs` | number | Refresh interval for current-month yearly balances (default: 60000) |
+| `yearlyBalancesRefreshFullMs` | number | Refresh interval for full yearly balances (default: 86400000) |
 
 ## Usage
 

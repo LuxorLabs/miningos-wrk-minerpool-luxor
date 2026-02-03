@@ -1,7 +1,7 @@
 'use strict'
 
 const { LuxorMinerPool } = require('./lib/luxor.minerpool')
-const { POOL_TYPE, MINUTE_MS, HOUR_MS, HOURS_24_MS, SCHEDULER_TIMES } = require('./lib/constants')
+const { POOL_TYPE, MINUTE_MS, HOUR_MS, HOURS_24_MS, SCHEDULER_TIMES, TRANSACTION_TYPES } = require('./lib/constants')
 const async = require('async')
 const TetherWrkBase = require('tether-wrk-base/workers/base.wrk.tether')
 const { getWorkersStats, getTimeRanges, isCurrentMonth, getMonthlyDateRanges, formatDateForApi } = require('./lib/utils')
@@ -37,6 +37,11 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     this.subaccountNames = this.conf.luxor.subaccountNames || []
     this.siteId = this.conf.luxor.siteId || null
     this.pageSize = this.conf.luxor.pageSize || 100
+    this.yearlyBalancesRefreshCurrentMs = this.conf.luxor.yearlyBalancesRefreshCurrentMs || MINUTE_MS
+    this.yearlyBalancesRefreshFullMs = this.conf.luxor.yearlyBalancesRefreshFullMs || HOURS_24_MS
+    this._yearlyBalancesLastCurrentRefresh = 0
+    this._yearlyBalancesLastFullRefresh = 0
+    this._yearlyBalancesRefreshing = false
 
     // Luxor API requires either subaccountNames or siteId
     if (this.subaccountNames.length === 0 && !this.siteId) {
@@ -101,6 +106,7 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
         case SCHEDULER_TIMES._1D.key:
           await this.fetchTransactions()
           await this.saveWorkers(time)
+          await this.getYearlyBalances({ currentOnly: false, force: true })
           break
       }
     } catch (e) {
@@ -147,8 +153,8 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
       // Extract hashprice
       const hashprice = this._extractHashprice(summary.hashprice)
 
-      // Get yearly balances
-      const yearlyBalances = await this.getYearlyBalances()
+      // Refresh current month yearly balances with caching (parity with F2Pool)
+      const yearlyBalances = await this.getYearlyBalances({ currentOnly: true })
 
       const stats = [{
         username: this.subaccountNames.length > 0 ? this.subaccountNames.join(',') : 'workspace',
@@ -242,38 +248,71 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     }
   }
 
-  async getYearlyBalances () {
+  _getYearlyBalancesSnapshot () {
+    return Object.entries(this.data.yearlyBalances || {}).map(([month, balance]) => ({ month, balance }))
+  }
+
+  async getYearlyBalances ({ currentOnly = false, force = false } = {}) {
+    if (this._yearlyBalancesRefreshing) {
+      return this._getYearlyBalancesSnapshot()
+    }
+
+    const now = Date.now()
+    if (!force) {
+      if (currentOnly && now - this._yearlyBalancesLastCurrentRefresh < this.yearlyBalancesRefreshCurrentMs) {
+        return this._getYearlyBalancesSnapshot()
+      }
+      if (!currentOnly && now - this._yearlyBalancesLastFullRefresh < this.yearlyBalancesRefreshFullMs) {
+        return this._getYearlyBalancesSnapshot()
+      }
+    }
+
+    this._yearlyBalancesRefreshing = true
     const queryOptions = this._getQueryOptions()
     const yearlyDateRanges = getMonthlyDateRanges(12)
     const balances = this.data.yearlyBalances
 
-    for (const [month, { startDate, endDate }] of Object.entries(yearlyDateRanges)) {
-      if (!balances[month] || isCurrentMonth(month)) {
+    try {
+      for (const [month, { startDate, endDate }] of Object.entries(yearlyDateRanges)) {
+        const isCurrent = isCurrentMonth(month)
+        if (currentOnly && !isCurrent) continue
+        if (!currentOnly && balances[month] && !isCurrent) continue
+
         try {
           const transactions = await this.luxorApi.getAllTransactions({
             ...queryOptions,
             startDate: formatDateForApi(startDate),
             endDate: formatDateForApi(endDate),
-            transactionType: 'credit' // Only credits (incoming)
+            transactionType: TRANSACTION_TYPES.CREDIT // Only credits (incoming)
           })
 
           balances[month] = transactions.reduce((bal, t) => bal + (t.currency_amount || 0), 0)
         } catch (e) {
           this._logErr('ERR_BALANCES_FETCH', e)
-          balances[month] = 0
+          if (!balances[month]) balances[month] = 0
         }
       }
+
+      this.data.yearlyBalances = balances
+      if (currentOnly) this._yearlyBalancesLastCurrentRefresh = now
+      else this._yearlyBalancesLastFullRefresh = now
+    } finally {
+      this._yearlyBalancesRefreshing = false
     }
 
-    this.data.yearlyBalances = balances
-    return Object.entries(balances).map(([month, balance]) => ({ month, balance }))
+    return this._getYearlyBalancesSnapshot()
   }
 
   _aggrTransactions (data, { start, end }) {
-    // Aggregate hourly revenue
+    // Aggregate hourly revenue (credits add, debits subtract)
     const totalRevenue = data.reduce((total, log) => {
       log.transactions?.forEach((transaction) => {
-        total += transaction.currency_amount || 0
+        const amount = transaction.currency_amount || 0
+        if (transaction.transaction_type === TRANSACTION_TYPES.DEBIT) {
+          total -= amount
+        } else {
+          total += amount
+        }
       })
       return total
     }, 0)
