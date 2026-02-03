@@ -1,7 +1,7 @@
 'use strict'
 
 const { LuxorMinerPool } = require('./lib/luxor.minerpool')
-const { POOL_TYPE, MINUTE_MS, HOUR_MS, HOURS_24_MS, BTC_SATS, SCHEDULER_TIMES } = require('./lib/constants')
+const { POOL_TYPE, MINUTE_MS, HOUR_MS, HOURS_24_MS, SCHEDULER_TIMES } = require('./lib/constants')
 const async = require('async')
 const TetherWrkBase = require('tether-wrk-base/workers/base.wrk.tether')
 const { getWorkersStats, getTimeRanges, isCurrentMonth, getMonthlyDateRanges, formatDateForApi } = require('./lib/utils')

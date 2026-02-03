@@ -249,24 +249,62 @@ test('LuxorMinerPool: getHashrateEfficiency should call correct endpoint', async
   const mockHttp = {
     get: async (url) => {
       t.ok(url.startsWith('/v2/pool/hashrate-efficiency/BTC'))
+      t.ok(url.includes('start_date='))
+      t.ok(url.includes('end_date='))
+      t.ok(url.includes('tick_size='))
       return { body: {} }
     }
   }
 
   const client = new LuxorMinerPool(mockHttp, 'test-api-key')
-  await client.getHashrateEfficiency()
+  await client.getHashrateEfficiency({
+    startDate: '2024-01-01',
+    endDate: '2024-01-07',
+    tickSize: '1d'
+  })
+})
+
+test('LuxorMinerPool: getHashrateEfficiency should require date range', async (t) => {
+  const mockHttp = {}
+  const client = new LuxorMinerPool(mockHttp, 'test-api-key')
+
+  try {
+    await client.getHashrateEfficiency({})
+    t.fail('Should have thrown an error')
+  } catch (e) {
+    t.is(e.message, 'ERR_DATE_RANGE_REQUIRED')
+  }
 })
 
 test('LuxorMinerPool: getUptime should call correct endpoint', async (t) => {
   const mockHttp = {
     get: async (url) => {
       t.ok(url.startsWith('/v2/pool/uptime/BTC'))
+      t.ok(url.includes('start_date='))
+      t.ok(url.includes('end_date='))
+      t.ok(url.includes('tick_size='))
       return { body: {} }
     }
   }
 
   const client = new LuxorMinerPool(mockHttp, 'test-api-key')
-  await client.getUptime()
+  await client.getUptime({
+    startDate: '2024-01-01',
+    endDate: '2024-01-07',
+    tickSize: '1d'
+  })
+})
+
+test('LuxorMinerPool: getUptime should require date range', async (t) => {
+  const mockHttp = {}
+  const client = new LuxorMinerPool(mockHttp, 'test-api-key')
+
+  try {
+    await client.getUptime({})
+    t.fail('Should have thrown an error')
+  } catch (e) {
+    t.is(e.message, 'ERR_DATE_RANGE_REQUIRED')
+  }
 })
 
 test('LuxorMinerPool: getRevenue should call correct endpoint', async (t) => {
