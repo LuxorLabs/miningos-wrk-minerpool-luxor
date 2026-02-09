@@ -16,7 +16,13 @@
       "email": "alexander.armua@luxor.tech"
     }
   ],
-  "keywords": ["tether", "miningos", "bitcoin", "mining", "luxor-pool"],
+  "keywords": [
+    "tether",
+    "miningos",
+    "bitcoin",
+    "mining",
+    "luxor-pool"
+  ],
   "scripts": {
     "lint": "standard",
     "lint:fix": "standard --fix",
@@ -47,6 +53,6 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/LuxorLabs/miningos-wrk-minerpool-luxor.git"
+    "url": "git+https://github.com/tetherto/miningos-wrk-minerpool-luxor.git"
   }
 }
