@@ -95,7 +95,10 @@ test('Luxor API Client: should fetch summary from mock server', async (t) => {
 
   t.ok(result)
   t.ok(result.hashrate_5m)
+  t.ok(result.hashrate_1h)
   t.ok(result.hashrate_24h)
+  t.ok(result.hashrate_stale_1h)
+  t.ok(result.hashrate_stale_24h)
   t.ok(result.efficiency_5m !== undefined)
   t.ok(result.uptime_24h !== undefined)
   t.ok(result.active_miners !== undefined)
@@ -171,25 +174,6 @@ test('Luxor API Client: should fetch pool hashrate from mock server', async (t) 
   t.ok(result.hashrate_5m)
   t.ok(result.hashrate_1h)
   t.ok(result.hashrate_24h)
-})
-
-test('Luxor API Client: should fetch hashrate efficiency from mock server', async (t) => {
-  const apiKey = 'api-test-key'
-  const client = new LuxorMinerPool(httpClient, apiKey)
-
-  const endDate = new Date()
-  const startDate = new Date(endDate.getTime() - 7 * 24 * 60 * 60 * 1000)
-
-  const result = await client.getHashrateEfficiency({
-    subaccountNames: ['testsubaccount'],
-    startDate: formatDateForApi(startDate),
-    endDate: formatDateForApi(endDate),
-    tickSize: '1d'
-  })
-
-  t.ok(result)
-  t.ok(result.hashrate_efficiency)
-  t.ok(Array.isArray(result.hashrate_efficiency))
 })
 
 test('Luxor API Client: should fetch uptime from mock server', async (t) => {

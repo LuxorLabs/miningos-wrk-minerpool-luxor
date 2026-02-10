@@ -1,6 +1,4 @@
 {
-  "grape": "ws://127.0.0.1:20001",
-  "workers": [
-    "workers/luxor.rack.minerpool.wrk.js"
-  ]
+  "dir_log": "logs",
+  "debug": 0
 }

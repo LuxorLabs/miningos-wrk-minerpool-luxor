@@ -39,7 +39,10 @@ test('LuxorMinerPool: getSummary should call _request with correct parameters', 
       return {
         body: {
           hashrate_5m: '1000000000000',
+          hashrate_1h: '800000000000',
           hashrate_24h: '950000000000',
+          hashrate_stale_1h: '400000000000',
+          hashrate_stale_24h: '300000000000',
           efficiency_5m: 0.99,
           active_miners: 100,
           balance: [{ currency_type: 'BTC', revenue: 0.5 }]
@@ -245,37 +248,6 @@ test('LuxorMinerPool: getPoolHashrate should call correct endpoint', async (t) =
   await client.getPoolHashrate()
 })
 
-test('LuxorMinerPool: getHashrateEfficiency should call correct endpoint', async (t) => {
-  const mockHttp = {
-    get: async (url) => {
-      t.ok(url.startsWith('/v2/pool/hashrate-efficiency/BTC'))
-      t.ok(url.includes('start_date='))
-      t.ok(url.includes('end_date='))
-      t.ok(url.includes('tick_size='))
-      return { body: {} }
-    }
-  }
-
-  const client = new LuxorMinerPool(mockHttp, 'test-api-key')
-  await client.getHashrateEfficiency({
-    startDate: '2024-01-01',
-    endDate: '2024-01-07',
-    tickSize: '1d'
-  })
-})
-
-test('LuxorMinerPool: getHashrateEfficiency should require date range', async (t) => {
-  const mockHttp = {}
-  const client = new LuxorMinerPool(mockHttp, 'test-api-key')
-
-  try {
-    await client.getHashrateEfficiency({})
-    t.fail('Should have thrown an error')
-  } catch (e) {
-    t.is(e.message, 'ERR_DATE_RANGE_REQUIRED')
-  }
-})
-
 test('LuxorMinerPool: getUptime should call correct endpoint', async (t) => {
   const mockHttp = {
     get: async (url) => {
@@ -329,4 +301,85 @@ test('LuxorMinerPool: getSubaccounts should call correct endpoint', async (t) =>
 
   const client = new LuxorMinerPool(mockHttp, 'test-api-key')
   await client.getSubaccounts()
+})
+
+test('LuxorMinerPool: getPoolStats should call correct endpoint', async (t) => {
+  const mockHttp = {
+    get: async (url) => {
+      t.ok(url.startsWith('/v2/pool/pool-stats/BTC'))
+      t.ok(url.includes('subaccount_names=sub1'))
+      t.ok(url.includes('site_id=site-1'))
+      return { body: { pool_hashrate: '500000000000' } }
+    }
+  }
+
+  const client = new LuxorMinerPool(mockHttp, 'test-api-key')
+  const result = await client.getPoolStats({ subaccountNames: ['sub1'], siteId: 'site-1' })
+  t.ok(result)
+  t.is(result.pool_hashrate, '500000000000')
+})
+
+test('LuxorMinerPool: getActiveWorkers should filter by ACTIVE status', async (t) => {
+  const mockHttp = {
+    get: async (url) => {
+      t.ok(url.includes('status=ACTIVE'))
+      return { body: { workers: [{ id: 'w1', status: 'ACTIVE' }], pagination: {} } }
+    }
+  }
+
+  const client = new LuxorMinerPool(mockHttp, 'test-api-key')
+  const result = await client.getActiveWorkers()
+  t.ok(result)
+  t.is(result.workers.length, 1)
+  t.is(result.workers[0].status, 'ACTIVE')
+})
+
+test('LuxorMinerPool: getRevenue should include subaccount and site filters', async (t) => {
+  const mockHttp = {
+    get: async (url) => {
+      t.ok(url.startsWith('/v2/pool/revenue/BTC'))
+      t.ok(url.includes('subaccount_names=sub1%2Csub2'))
+      t.ok(url.includes('site_id=site-1'))
+      return { body: { revenue: 0.5 } }
+    }
+  }
+
+  const client = new LuxorMinerPool(mockHttp, 'test-api-key')
+  const result = await client.getRevenue({ subaccountNames: ['sub1', 'sub2'], siteId: 'site-1' })
+  t.ok(result)
+  t.is(result.revenue, 0.5)
+})
+
+test('LuxorMinerPool: getAllTransactions should paginate through all results', async (t) => {
+  let callCount = 0
+  const mockHttp = {
+    get: async (url) => {
+      callCount++
+      if (callCount === 1) {
+        return {
+          body: {
+            transactions: [{ transaction_id: 'tx1' }, { transaction_id: 'tx2' }],
+            pagination: { next_page_url: '/next' }
+          }
+        }
+      }
+      return {
+        body: {
+          transactions: [{ transaction_id: 'tx3' }],
+          pagination: { next_page_url: null }
+        }
+      }
+    }
+  }
+
+  const client = new LuxorMinerPool(mockHttp, 'test-api-key')
+  const result = await client.getAllTransactions({
+    startDate: '2024-01-01',
+    endDate: '2024-01-31'
+  })
+
+  t.is(callCount, 2)
+  t.is(result.length, 3)
+  t.is(result[0].transaction_id, 'tx1')
+  t.is(result[2].transaction_id, 'tx3')
 })

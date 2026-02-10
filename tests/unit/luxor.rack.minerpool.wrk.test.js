@@ -71,7 +71,10 @@ function createMockWorker (conf, ctx) {
   worker.luxorApi = {
     getSummary: async () => ({
       hashrate_5m: '100000000000000',
+      hashrate_1h: '80000000000000',
       hashrate_24h: '95000000000000',
+      hashrate_stale_1h: '40000000000000',
+      hashrate_stale_24h: '30000000000000',
       efficiency_5m: 0.99,
       uptime_24h: 0.995,
       active_miners: 10,
@@ -130,6 +133,13 @@ function createMockWorker (conf, ctx) {
 
   return worker
 }
+
+test('WrkMinerPoolRackLuxor: listThings should return empty array', async (t) => {
+  const worker = createMockWorker()
+  const result = await worker.listThings({})
+  t.ok(Array.isArray(result))
+  t.is(result.length, 0)
+})
 
 test('WrkMinerPoolRackLuxor: constructor should throw error when rack is undefined', (t) => {
   const conf = {
@@ -281,49 +291,6 @@ test('WrkMinerPoolRackLuxor: getDbData should read from database stream', async 
   t.is(result.length, 2)
   t.is(result[0].data, 'test1')
   t.is(result[1].data, 'test2')
-})
-
-test('WrkMinerPoolRackLuxor: _extractMiningRevenue should extract MINING revenue', (t) => {
-  const worker = createMockWorker()
-
-  const revenueArray = [
-    { revenue_type: 'MINING', revenue: 0.5 },
-    { revenue_type: 'REFERRAL', revenue: 0.1 }
-  ]
-
-  const result = worker._extractMiningRevenue(revenueArray)
-  t.is(result, 0.5)
-})
-
-test('WrkMinerPoolRackLuxor: _extractMiningRevenue should return 0 for empty array', (t) => {
-  const worker = createMockWorker()
-  t.is(worker._extractMiningRevenue([]), 0)
-  t.is(worker._extractMiningRevenue(null), 0)
-})
-
-test('WrkMinerPoolRackLuxor: _extractBalance should extract balance for currency', (t) => {
-  const worker = createMockWorker()
-  worker.currencyType = 'BTC'
-
-  const balanceArray = [
-    { currency_type: 'BTC', revenue: 1.5 },
-    { currency_type: 'LTC', revenue: 10 }
-  ]
-
-  const result = worker._extractBalance(balanceArray)
-  t.is(result, 1.5)
-})
-
-test('WrkMinerPoolRackLuxor: _extractHashprice should extract hashprice for currency', (t) => {
-  const worker = createMockWorker()
-  worker.currencyType = 'BTC'
-
-  const hashpriceArray = [
-    { currency_type: 'BTC', value: 0.00059 }
-  ]
-
-  const result = worker._extractHashprice(hashpriceArray)
-  t.is(result, 0.00059)
 })
 
 test('WrkMinerPoolRackLuxor: getYearlyBalances should refresh current month only', async (t) => {
@@ -652,4 +619,201 @@ test('WrkMinerPoolRackLuxor: _avg should calculate running average', (t) => {
   t.is(worker._avg(0, 10, 1), 10)
   t.is(worker._avg(10, 20, 2), 15)
   t.is(worker._avg(15, 30, 3), 20)
+})
+
+test('WrkMinerPoolRackLuxor: getWrkExtData should return workers data', async (t) => {
+  const worker = createMockWorker()
+  worker.data.workersData.workers = [
+    { id: 'w1', name: 'miner1', hashrate: 100 },
+    { id: 'w2', name: 'miner2', hashrate: 200 }
+  ]
+
+  const result = await worker.getWrkExtData({ query: { key: 'workers', offset: 0, limit: 10 } })
+  t.ok(result)
+  t.ok(result.workers)
+  t.is(result.workers.length, 2)
+  t.is(result.workers[0].poolType, POOL_TYPE)
+  t.is(result.workers[1].poolType, POOL_TYPE)
+})
+
+test('WrkMinerPoolRackLuxor: getWrkExtData should return workers-count data', async (t) => {
+  const worker = createMockWorker()
+  const mockEntries = [
+    { value: Buffer.from(JSON.stringify({ ts: 1000, count: 10, active: 8, inactive: 2 })) },
+    { value: Buffer.from(JSON.stringify({ ts: 2000, count: 12, active: 10, inactive: 2 })) }
+  ]
+
+  worker.workersCountDb = {
+    createReadStream: function (query) {
+      t.ok(query.gte)
+      t.ok(query.lte)
+      return mockEntries
+    }
+  }
+
+  const result = await worker.getWrkExtData({ query: { key: 'workers-count', start: 1000, end: 2000 } })
+  t.ok(Array.isArray(result))
+  t.is(result.length, 2)
+  t.is(result[0].count, 10)
+  t.is(result[1].count, 12)
+})
+
+test('WrkMinerPoolRackLuxor: getWrkExtData should aggregate transactions hourly', async (t) => {
+  const worker = createMockWorker()
+  const start = new Date('2024-01-01T00:00:00Z').getTime()
+  const end = new Date('2024-01-01T02:00:00Z').getTime()
+
+  const mockEntries = [
+    {
+      value: Buffer.from(JSON.stringify({
+        ts: start,
+        transactions: [
+          { currency_amount: 0.001, transaction_type: 'credit' },
+          { currency_amount: 0.002, transaction_type: 'credit' }
+        ]
+      }))
+    }
+  ]
+
+  worker.transactionsDb = {
+    createReadStream: function () {
+      return mockEntries
+    }
+  }
+
+  const result = await worker.getWrkExtData({
+    query: { key: 'transactions', start, end, aggrHourly: true }
+  })
+
+  t.ok(result)
+  t.ok('hourlyRevenues' in result)
+  t.ok(Array.isArray(result.hourlyRevenues))
+  t.ok(result.hourlyRevenues.length > 0)
+})
+
+test('WrkMinerPoolRackLuxor: getWrkExtData should return stats-history data', async (t) => {
+  const worker = createMockWorker()
+  const mockEntries = [
+    {
+      value: Buffer.from(JSON.stringify({
+        ts: 1000,
+        stats: [{ username: 'sub1', hashrate: 100 }]
+      }))
+    },
+    {
+      value: Buffer.from(JSON.stringify({
+        ts: 2000,
+        stats: [{ username: 'sub1', hashrate: 200 }]
+      }))
+    }
+  ]
+
+  worker.statsDb = {
+    createReadStream: function () {
+      return mockEntries
+    }
+  }
+
+  const result = await worker.getWrkExtData({ query: { key: 'stats-history', start: 1000, end: 2000 } })
+  t.ok(Array.isArray(result))
+  t.is(result.length, 2)
+  t.is(result[0].stats[0].poolType, POOL_TYPE)
+  t.is(result[1].stats[0].poolType, POOL_TYPE)
+})
+
+test('WrkMinerPoolRackLuxor: getWrkExtData should aggregate stats-history by interval', async (t) => {
+  const worker = createMockWorker()
+  const baseTs = new Date('2024-01-01T00:00:00Z').getTime()
+  const mockEntries = [
+    {
+      value: Buffer.from(JSON.stringify({
+        ts: baseTs,
+        stats: [{ username: 'sub1', hashrate: 100 }]
+      }))
+    },
+    {
+      value: Buffer.from(JSON.stringify({
+        ts: baseTs + 5 * 60 * 1000,
+        stats: [{ username: 'sub1', hashrate: 200 }]
+      }))
+    },
+    {
+      value: Buffer.from(JSON.stringify({
+        ts: baseTs + 10 * 60 * 1000,
+        stats: [{ username: 'sub1', hashrate: 300 }]
+      }))
+    },
+    {
+      value: Buffer.from(JSON.stringify({
+        ts: baseTs + 35 * 60 * 1000,
+        stats: [{ username: 'sub1', hashrate: 400 }]
+      }))
+    }
+  ]
+
+  worker.statsDb = {
+    createReadStream: function () {
+      return mockEntries
+    }
+  }
+
+  const result = await worker.getWrkExtData({
+    query: { key: 'stats-history', start: baseTs, end: baseTs + 60 * 60 * 1000, interval: '30m' }
+  })
+
+  t.ok(Array.isArray(result))
+  t.ok(result.length < 4)
+  result.forEach(d => {
+    t.ok(d.stats)
+    t.is(d.stats[0].poolType, POOL_TYPE)
+  })
+})
+
+test('WrkMinerPoolRackLuxor: getWrkExtData should apply field projection', async (t) => {
+  const worker = createMockWorker()
+  worker.data.statsData = {
+    ts: 1000,
+    stats: [
+      { username: 'testsubaccount', balance: 1000, hashrate: 500 }
+    ]
+  }
+
+  const result = await worker.getWrkExtData({
+    query: { key: 'stats', fields: { 'stats.username': 1 } }
+  })
+
+  t.ok(result)
+  t.ok(result.stats)
+  t.ok('username' in result.stats[0])
+})
+
+test('WrkMinerPoolRackLuxor: getWorkers should filter by name from database', async (t) => {
+  const worker = createMockWorker()
+  const mockEntries = [
+    {
+      value: Buffer.from(JSON.stringify({
+        ts: 1000,
+        workers: [
+          { id: 'w1', name: 'miner1', hashrate: 100 },
+          { id: 'w2', name: 'miner2', hashrate: 200 },
+          { id: 'w3', name: 'miner1', hashrate: 150 }
+        ]
+      }))
+    }
+  ]
+
+  worker.workersDb = {
+    createReadStream: function () {
+      return mockEntries
+    }
+  }
+
+  const result = await worker.getWorkers({ start: 1000, end: 2000, name: 'miner1' })
+  t.ok(Array.isArray(result))
+  t.is(result.length, 1)
+  t.is(result[0].workers.length, 2)
+  result[0].workers.forEach(w => {
+    t.is(w.name, 'miner1')
+    t.is(w.poolType, POOL_TYPE)
+  })
 })

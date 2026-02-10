@@ -33,11 +33,10 @@ test('transformWorkerData: should transform Luxor worker to MiningOS format', (t
 
   t.is(result.id, 'worker-123')
   t.is(result.name, 'miner1')
-  t.is(result.subaccount_name, 'subaccount1')
+  t.is(result.username, 'subaccount1')
   t.is(result.online, 1)
   t.is(result.last_updated, '2024-01-01T00:00:00Z')
   t.is(result.hashrate, 100000000000)
-  t.is(result.efficiency, 0.98)
   t.is(result.stale_shares, 0.01)
   t.is(result.rejected_shares, 0.005)
   t.is(result.firmware, '1.0.0')
@@ -64,7 +63,6 @@ test('transformWorkerData: should handle missing fields', (t) => {
 
   const result = transformWorkerData(worker)
   t.is(result.hashrate, 0)
-  t.is(result.efficiency, 0)
   t.is(result.stale_shares, 0)
   t.is(result.rejected_shares, 0)
   t.is(result.firmware, '')
@@ -161,7 +159,10 @@ test('extractHashprice: should handle non-array input', (t) => {
 test('transformSummaryToStats: should transform summary to stats format', (t) => {
   const summary = {
     hashrate_5m: '1000000000000',
+    hashrate_1h: '800000000000',
     hashrate_24h: '950000000000',
+    hashrate_stale_1h: '400000000000',
+    hashrate_stale_24h: '300000000000',
     efficiency_5m: 0.98,
     uptime_24h: 0.99,
     active_miners: 100,
@@ -175,7 +176,10 @@ test('transformSummaryToStats: should transform summary to stats format', (t) =>
   const result = transformSummaryToStats(summary)
 
   t.is(result.hashrate, 1000000000000)
+  t.is(result.hashrate_1h, 800000000000)
   t.is(result.hashrate_24h, 950000000000)
+  t.is(result.hashrate_stale_1h, 400000000000)
+  t.is(result.hashrate_stale_24h, 300000000000)
   t.is(result.efficiency, 0.98)
   t.is(result.uptime_24h, 0.99)
   t.is(result.active_workers_count, 100)
@@ -293,4 +297,62 @@ test('getTimeRanges: should generate daily ranges when isHourly is false', (t) =
     const diff = range.end - range.start
     t.ok(diff <= 24 * 60 * 60 * 1000 + 1000)
   })
+})
+
+test('transformWorkerData: should handle UNSPECIFIED status as offline', (t) => {
+  const worker = {
+    id: 'worker-123',
+    name: 'miner1',
+    status: 'UNSPECIFIED',
+    hashrate: 0
+  }
+
+  const result = transformWorkerData(worker)
+  t.is(result.online, 0)
+})
+
+test('extractMiningRevenue: should return 0 for undefined revenue value', (t) => {
+  const revenueArray = [
+    { revenue_type: 'MINING', revenue: undefined }
+  ]
+
+  const result = extractMiningRevenue(revenueArray)
+  t.is(result, 0)
+})
+
+test('extractBalance: should return 0 for undefined balance value', (t) => {
+  const balanceArray = [
+    { currency_type: 'BTC', revenue: undefined }
+  ]
+
+  const result = extractBalance(balanceArray, 'BTC')
+  t.is(result, 0)
+})
+
+test('extractHashprice: should return 0 for undefined hashprice value', (t) => {
+  const hashpriceArray = [
+    { currency_type: 'BTC', value: undefined }
+  ]
+
+  const result = extractHashprice(hashpriceArray, 'BTC')
+  t.is(result, 0)
+})
+
+test('transformSummaryToStats: should handle missing summary fields', (t) => {
+  const result = transformSummaryToStats({})
+
+  t.is(result.hashrate, 0)
+  t.is(result.hashrate_1h, 0)
+  t.is(result.hashrate_24h, 0)
+  t.is(result.hashrate_stale_1h, 0)
+  t.is(result.hashrate_stale_24h, 0)
+  t.is(result.efficiency, 0)
+  t.is(result.uptime_24h, 0)
+  t.is(result.active_workers_count, 0)
+  t.is(result.revenue_24h, 0)
+  t.is(result.revenue_all_time, 0)
+  t.is(result.balance, 0)
+  t.is(result.hashprice, 0)
+  t.alike(result.subaccounts, [])
+  t.ok(result.timestamp > 0)
 })

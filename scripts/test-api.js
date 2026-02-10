@@ -131,16 +131,19 @@ async function runTests () {
     saveSnapshot('summary', snapshots.summary)
 
     console.log('\nResponse Structure:')
-    console.log(`  hashrate_5m:       ${typeof summary.hashrate_5m} = ${summary.hashrate_5m}`)
-    console.log(`  hashrate_24h:      ${typeof summary.hashrate_24h} = ${summary.hashrate_24h}`)
-    console.log(`  efficiency_5m:     ${typeof summary.efficiency_5m} = ${summary.efficiency_5m}`)
-    console.log(`  uptime_24h:        ${typeof summary.uptime_24h} = ${summary.uptime_24h}`)
-    console.log(`  active_miners:     ${typeof summary.active_miners} = ${summary.active_miners}`)
-    console.log(`  revenue_24h:       ${Array.isArray(summary.revenue_24h) ? 'array' : typeof summary.revenue_24h}[${summary.revenue_24h?.length}]`)
-    console.log(`  revenue_all_time:  ${Array.isArray(summary.revenue_all_time) ? 'array' : typeof summary.revenue_all_time}[${summary.revenue_all_time?.length}]`)
-    console.log(`  balance:           ${Array.isArray(summary.balance) ? 'array' : typeof summary.balance}[${summary.balance?.length}]`)
-    console.log(`  hashprice:         ${Array.isArray(summary.hashprice) ? 'array' : typeof summary.hashprice}[${summary.hashprice?.length}]`)
-    console.log(`  subaccounts:       ${Array.isArray(summary.subaccounts) ? 'array' : typeof summary.subaccounts}[${summary.subaccounts?.length}]`)
+    console.log(`  hashrate_5m:        ${typeof summary.hashrate_5m} = ${summary.hashrate_5m}`)
+    console.log(`  hashrate_1h:        ${typeof summary.hashrate_1h} = ${summary.hashrate_1h}`)
+    console.log(`  hashrate_24h:       ${typeof summary.hashrate_24h} = ${summary.hashrate_24h}`)
+    console.log(`  hashrate_stale_1h:  ${typeof summary.hashrate_stale_1h} = ${summary.hashrate_stale_1h}`)
+    console.log(`  hashrate_stale_24h: ${typeof summary.hashrate_stale_24h} = ${summary.hashrate_stale_24h}`)
+    console.log(`  efficiency_5m:      ${typeof summary.efficiency_5m} = ${summary.efficiency_5m}`)
+    console.log(`  uptime_24h:         ${typeof summary.uptime_24h} = ${summary.uptime_24h}`)
+    console.log(`  active_miners:      ${typeof summary.active_miners} = ${summary.active_miners}`)
+    console.log(`  revenue_24h:        ${Array.isArray(summary.revenue_24h) ? 'array' : typeof summary.revenue_24h}[${summary.revenue_24h?.length}]`)
+    console.log(`  revenue_all_time:   ${Array.isArray(summary.revenue_all_time) ? 'array' : typeof summary.revenue_all_time}[${summary.revenue_all_time?.length}]`)
+    console.log(`  balance:            ${Array.isArray(summary.balance) ? 'array' : typeof summary.balance}[${summary.balance?.length}]`)
+    console.log(`  hashprice:          ${Array.isArray(summary.hashprice) ? 'array' : typeof summary.hashprice}[${summary.hashprice?.length}]`)
+    console.log(`  subaccounts:        ${Array.isArray(summary.subaccounts) ? 'array' : typeof summary.subaccounts}[${summary.subaccounts?.length}]`)
 
     if (summary.revenue_24h?.length > 0) {
       console.log('\n  revenue_24h[0] structure:')
@@ -251,40 +254,6 @@ async function runTests () {
   } catch (e) {
     console.error(`\n✗ Pool Hashrate test FAILED: ${e.message}`)
     results.poolHashrate = { error: e.message }
-  }
-
-  // Test 5: Get Hashrate Efficiency (last 7 days)
-  console.log('\n' + '─'.repeat(60))
-  console.log('TEST 5: Get Hashrate Efficiency (last 7 days)')
-  console.log('─'.repeat(60))
-  try {
-    http.clearResponses()
-    const endDate = new Date()
-    const startDate = new Date(endDate.getTime() - 7 * 24 * 60 * 60 * 1000)
-
-    const efficiency = await client.getHashrateEfficiency({
-      ...queryOptions,
-      startDate: formatDateForApi(startDate),
-      endDate: formatDateForApi(endDate),
-      tickSize: '1d'
-    })
-    results.efficiency = efficiency
-    snapshots.efficiency = http.getRawResponses()[0]?.body
-    saveSnapshot('hashrate-efficiency', snapshots.efficiency)
-
-    console.log('\nResponse Structure:')
-    console.log(`  hashrate_efficiency: array[${efficiency.hashrate_efficiency?.length}]`)
-
-    if (efficiency.hashrate_efficiency?.length > 0) {
-      console.log('\n  hashrate_efficiency[0] structure:')
-      const e = efficiency.hashrate_efficiency[0]
-      Object.keys(e).forEach(k => console.log(`    ${k}: ${typeof e[k]} = ${e[k]}`))
-    }
-
-    console.log('\n✓ Hashrate Efficiency test PASSED')
-  } catch (e) {
-    console.error(`\n✗ Hashrate Efficiency test FAILED: ${e.message}`)
-    results.efficiency = { error: e.message }
   }
 
   // Test 6: Get Uptime (last 7 days)

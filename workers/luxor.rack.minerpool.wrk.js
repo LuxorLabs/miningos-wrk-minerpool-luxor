@@ -4,10 +4,39 @@ const { LuxorMinerPool } = require('./lib/luxor.minerpool')
 const { POOL_TYPE, MINUTE_MS, HOUR_MS, HOURS_24_MS, SCHEDULER_TIMES, TRANSACTION_TYPES } = require('./lib/constants')
 const async = require('async')
 const TetherWrkBase = require('tether-wrk-base/workers/base.wrk.tether')
-const { getWorkersStats, getTimeRanges, isCurrentMonth, getMonthlyDateRanges, formatDateForApi } = require('./lib/utils')
+const { transformSummaryToStats, getWorkersStats, getTimeRanges, isCurrentMonth, getMonthlyDateRanges, formatDateForApi } = require('./lib/utils')
 const utilsStore = require('hp-svc-facs-store/utils')
 const gLibUtilBase = require('lib-js-util-base')
 const mingo = require('mingo')
+
+/**
+ * @typedef {Object} YearlyBalance
+ * @property {string} month - Month in "M-YYYY" format
+ * @property {number} balance - Total balance for the month
+ */
+
+/**
+ * @typedef {Object} StatsEntry
+ * @property {string} username
+ * @property {number} timestamp
+ * @property {number} balance
+ * @property {number} unsettled
+ * @property {number} revenue_24h
+ * @property {number} estimated_today_income
+ * @property {number} hashrate
+ * @property {number} hashrate_1h
+ * @property {number} hashrate_24h
+ * @property {number} hashrate_stale_1h
+ * @property {number} hashrate_stale_24h
+ * @property {number} worker_count
+ * @property {number} active_workers_count
+ * @property {Array<YearlyBalance>} yearlyBalances
+ * @property {number} efficiency
+ * @property {number} uptime_24h
+ * @property {number} hashprice
+ * @property {Array} subaccounts
+ * @property {number} revenue_all_time
+ */
 
 class WrkMinerPoolRackLuxor extends TetherWrkBase {
   constructor (conf, ctx) {
@@ -28,6 +57,7 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     }
   }
 
+  /** @returns {void} */
   init () {
     super.init()
 
@@ -61,12 +91,21 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     ])
   }
 
+  /**
+   * @param {Function} cb
+   * @returns {void}
+   */
   _start (cb) {
     async.series([
       (next) => { super._start(next) },
       async () => {
         this.net_r0.rpcServer.respond('getWrkExtData', async (req) => {
           return await this.net_r0.handleReply('getWrkExtData', req)
+        })
+
+        // Ork shows a log error if this method is not registered
+        this.net_r0.rpcServer.respond('listThings', async (req) => {
+          return await this.net_r0.handleReply('listThings', req)
         })
 
         const db = await this.store_s1.getBee(
@@ -93,6 +132,11 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     ], cb)
   }
 
+  /**
+   * @param {string} key
+   * @param {Date} time
+   * @returns {Promise<void>}
+   */
   async fetchData (key, time) {
     try {
       switch (key) {
@@ -114,14 +158,26 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     }
   }
 
+  /**
+   * @param {Object} db
+   * @param {number} ts
+   * @param {Object} data
+   * @returns {Promise<void>}
+   */
   async _saveToDb (db, ts, data) {
     await db.put(utilsStore.convIntToBin(ts), Buffer.from(JSON.stringify(data)))
   }
 
+  /**
+   * @param {string} msg
+   * @param {Error} err
+   * @returns {void}
+   */
   _logErr (msg, err) {
     console.error(new Date().toISOString(), msg, err)
   }
 
+  /** @returns {QueryOptions} */
   _getQueryOptions () {
     const options = {}
     if (this.subaccountNames && this.subaccountNames.length > 0) {
@@ -133,25 +189,17 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     return options
   }
 
+  /**
+   * @param {Date} time
+   * @returns {Promise<void>}
+   */
   async fetchStats (time) {
     const queryOptions = this._getQueryOptions()
 
     try {
-      const summary = await this.luxorApi.getSummary(queryOptions)
+      const rawSummary = await this.luxorApi.getSummary(queryOptions)
 
-      // Parse hashrate strings to numbers
-      const hashrate5m = parseFloat(summary.hashrate_5m) || 0
-      const hashrate24h = parseFloat(summary.hashrate_24h) || 0
-
-      // Extract mining revenue from revenue arrays
-      const revenue24h = this._extractMiningRevenue(summary.revenue_24h)
-      const revenueAllTime = this._extractMiningRevenue(summary.revenue_all_time)
-
-      // Extract balance
-      const balance = this._extractBalance(summary.balance)
-
-      // Extract hashprice
-      const hashprice = this._extractHashprice(summary.hashprice)
+      const summary = transformSummaryToStats(rawSummary)
 
       // Refresh current month yearly balances with caching (parity with F2Pool)
       const yearlyBalances = await this.getYearlyBalances({ currentOnly: true })
@@ -159,18 +207,24 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
       const stats = [{
         username: this.subaccountNames.length > 0 ? this.subaccountNames.join(',') : 'workspace',
         timestamp: Date.now(),
-        balance,
-        revenue_24h: revenue24h,
-        revenue_all_time: revenueAllTime,
-        hashrate: hashrate5m,
-        hashrate_24h: hashrate24h,
-        efficiency: summary.efficiency_5m || 0,
-        uptime_24h: summary.uptime_24h || 0,
-        active_workers_count: summary.active_miners || 0,
+        balance: summary.balance,
+        unsettled: 0,
+        revenue_24h: summary.revenue_24h,
+        estimated_today_income: summary.revenue_24h,
+        hashrate: summary.hashrate,
+        hashrate_1h: summary.hashrate_1h,
+        hashrate_24h: summary.hashrate_24h,
+        hashrate_stale_1h: summary.hashrate_stale_1h,
+        hashrate_stale_24h: summary.hashrate_stale_24h,
         worker_count: this.data.workersData.workers.length,
-        hashprice,
+        active_workers_count: summary.active_workers_count || 0,
         yearlyBalances,
-        subaccounts: summary.subaccounts || []
+        // Extra fields
+        efficiency: summary.efficiency || 0,
+        uptime_24h: summary.uptime_24h || 0,
+        hashprice: summary.hashprice,
+        subaccounts: summary.subaccounts || [],
+        revenue_all_time: summary.revenue_all_time
       }]
 
       this.data.statsData = { ts: Math.floor(time.getTime() / 1000) * 1000, stats }
@@ -179,34 +233,28 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     }
   }
 
-  _extractMiningRevenue (revenueArray) {
-    if (!Array.isArray(revenueArray)) return 0
-    const miningRevenue = revenueArray.find(r => r.revenue_type === 'MINING')
-    return miningRevenue?.revenue || 0
-  }
-
-  _extractBalance (balanceArray) {
-    if (!Array.isArray(balanceArray)) return 0
-    const balance = balanceArray.find(b => b.currency_type === this.currencyType)
-    return balance?.revenue || 0
-  }
-
-  _extractHashprice (hashpriceArray) {
-    if (!Array.isArray(hashpriceArray)) return 0
-    const hashprice = hashpriceArray.find(h => h.currency_type === this.currencyType)
-    return hashprice?.value || 0
-  }
-
+  /**
+   * @param {Date} time
+   * @returns {Promise<void>}
+   */
   async saveStats (time) {
     const ts = Math.floor(time.getTime() / 1000) * 1000
     await this._saveToDb(this.statsDb, ts, { ts, stats: this.data.statsData.stats })
   }
 
+  /**
+   * @param {Date} time
+   * @returns {Promise<void>}
+   */
   async saveWorkers (time) {
     const ts = Math.floor(time.getTime() / 1000) * 1000
     await this._saveToDb(this.workersDb, ts, { ts, workers: this.data.workersData.workers })
   }
 
+  /**
+   * @param {Date} time
+   * @returns {Promise<void>}
+   */
   async fetchWorkers (time) {
     const queryOptions = this._getQueryOptions()
 
@@ -227,6 +275,7 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     }
   }
 
+  /** @returns {Promise<void>} */
   async fetchTransactions () {
     const queryOptions = this._getQueryOptions()
 
@@ -248,10 +297,17 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     }
   }
 
+  /** @returns {YearlyBalance[]} */
   _getYearlyBalancesSnapshot () {
     return Object.entries(this.data.yearlyBalances || {}).map(([month, balance]) => ({ month, balance }))
   }
 
+  /**
+   * @param {Object} [options]
+   * @param {boolean} [options.currentOnly]
+   * @param {boolean} [options.force]
+   * @returns {Promise<YearlyBalance[]>}
+   */
   async getYearlyBalances ({ currentOnly = false, force = false } = {}) {
     if (this._yearlyBalancesRefreshing) {
       return this._getYearlyBalancesSnapshot()
@@ -278,11 +334,15 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
         if (currentOnly && !isCurrent) continue
         if (!currentOnly && balances[month] && !isCurrent) continue
 
+        // The end_date never must be bigger than today, otherwise the API will return an error
+        // For example today is 2026-02-08 and `isCurrent` is true, the endDate is 2026-03-01, so must be converted to 2026-02-08 (today)
+        const maxSafeEndDate = isCurrent ? Date.now() : endDate
+
         try {
           const transactions = await this.luxorApi.getAllTransactions({
             ...queryOptions,
             startDate: formatDateForApi(startDate),
-            endDate: formatDateForApi(endDate),
+            endDate: formatDateForApi(maxSafeEndDate),
             transactionType: TRANSACTION_TYPES.CREDIT // Only credits (incoming)
           })
 
@@ -303,6 +363,11 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     return this._getYearlyBalancesSnapshot()
   }
 
+  /**
+   * @param {Array<{transactions: Transaction[]}>} data
+   * @param {{start: number, end: number}} options
+   * @returns {{ts: number, hourlyRevenues: Array<{ts: number, revenue: number}>}}
+   */
   _aggrTransactions (data, { start, end }) {
     // Aggregate hourly revenue (credits add, debits subtract)
     const totalRevenue = data.reduce((total, log) => {
@@ -329,6 +394,10 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     return { ts: Date.now(), hourlyRevenues }
   }
 
+  /**
+   * @param {string} interval
+   * @returns {number}
+   */
   _getIntervalMs (interval) {
     switch (interval) {
       case '1D':
@@ -343,10 +412,21 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     }
   }
 
+  /**
+   * @param {number} avg
+   * @param {number} value
+   * @param {number} count
+   * @returns {number}
+   */
   _avg (avg, value, count) {
     return (avg * (count - 1) + value) / count
   }
 
+  /**
+   * @param {Array<{ts: number, stats: Array}>} data
+   * @param {string} interval
+   * @returns {Array<{ts: number, stats: Array}>}
+   */
   _aggrByInterval (data, interval) {
     const intervalMs = this._getIntervalMs(interval)
     const aggrBuckets = {}
@@ -373,6 +453,11 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     })
   }
 
+  /**
+   * @param {Object} db
+   * @param {{start: number, end: number}} options
+   * @returns {Promise<Array>}
+   */
   async getDbData (db, { start, end }) {
     if (!start) throw new Error('ERR_START_INVALID')
     if (!end) throw new Error('ERR_END_INVALID')
@@ -391,6 +476,11 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     return res
   }
 
+  /**
+   * @param {Array|Object} data
+   * @param {Object} [fields]
+   * @returns {Array|Object}
+   */
   _projection (data, fields = {}) {
     const query = new mingo.Query({})
     if (Array.isArray(data)) return query.find(data, fields).all()
@@ -398,10 +488,20 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     return cursor.all()[0]
   }
 
+  /**
+   * @param {WorkerStats[]} workers
+   * @param {number} offset
+   * @param {number} limit
+   * @returns {WorkerStats[]}
+   */
   filterWorkers (workers, offset, limit) {
     return workers.slice(offset, offset + (Math.min(limit, 100)))
   }
 
+  /**
+   * @param {{offset?: number, limit?: number, name?: string, start?: number, end?: number}} query
+   * @returns {Promise<Object|Array>}
+   */
   async getWorkers (query) {
     const { offset = 0, limit = 100, name, start, end } = query
     if (!start || !end) {
@@ -420,10 +520,26 @@ class WrkMinerPoolRackLuxor extends TetherWrkBase {
     }, [])
   }
 
+  /**
+   * @param {Array<Object>} data
+   * @returns {Array<Object>}
+   */
   appendPoolType (data) {
     return data.map(d => ({ poolType: POOL_TYPE, ...d }))
   }
 
+  /**
+   * @param {Object} req
+   * @returns {Promise<Array>}
+   */
+  async listThings (req) {
+    return []
+  }
+
+  /**
+   * @param {{query: {key: string, start?: number, end?: number, aggrHourly?: boolean, interval?: string, fields?: Object}}} req
+   * @returns {Promise<Object>}
+   */
   async getWrkExtData (req) {
     const { query } = req
     if (!query) throw new Error('ERR_QUERY_INVALID')

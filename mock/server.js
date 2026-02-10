@@ -98,7 +98,10 @@ function createInitialState (ctx) {
     transactions: generateTransactions(ctx.subaccounts[0]),
     summary: {
       hashrate_5m: '800000000000000',
+      hashrate_1h: '790000000000000',
       hashrate_24h: '780000000000000',
+      hashrate_stale_1h: '400000000000000',
+      hashrate_stale_24h: '300000000000000',
       efficiency_5m: 0.99,
       uptime_24h: 0.995,
       active_miners: 8,

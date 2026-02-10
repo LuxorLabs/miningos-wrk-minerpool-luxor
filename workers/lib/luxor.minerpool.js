@@ -4,6 +4,180 @@ const { setTimeout: sleep } = require('timers/promises')
 const { CURRENCY, DEFAULT_PAGE_SIZE, WORKER_STATUS } = require('./constants')
 
 /**
+ * @typedef {Object} QueryOptions
+ * @property {string|string[]} [subaccountNames] - Subaccount names to filter by
+ * @property {string} [siteId] - Site ID to filter by
+ */
+
+/**
+ * @typedef {Object} PaginatedOptions
+ * @property {number} [pageNumber] - Page number (1-indexed)
+ * @property {number} [pageSize] - Items per page
+ */
+
+/**
+ * @typedef {Object} DateRangeOptions
+ * @property {string} startDate - Start date (YYYY-MM-DD)
+ * @property {string} endDate - End date (YYYY-MM-DD)
+ */
+
+/**
+ * @typedef {Object} PaginationInfo
+ * @property {number} page_number
+ * @property {number} page_size
+ * @property {number} item_count
+ * @property {string|null} previous_page_url
+ * @property {string|null} next_page_url
+ */
+
+/**
+ * @typedef {Object} Site
+ * @property {string} id - UUID
+ * @property {string} name
+ */
+
+/**
+ * @typedef {Object} Subaccount
+ * @property {number} id
+ * @property {string} name
+ * @property {Site} site
+ * @property {string} created_at - ISO 8601 timestamp
+ * @property {string} url
+ */
+
+/**
+ * @typedef {Object} RevenueEntry
+ * @property {string} currency_type
+ * @property {number} revenue
+ * @property {string} revenue_type - e.g. 'MINING'
+ */
+
+/**
+ * @typedef {Object} BalanceEntry
+ * @property {string} currency_type
+ * @property {number} revenue
+ */
+
+/**
+ * @typedef {Object} HashpriceEntry
+ * @property {string} currency_type
+ * @property {number} value
+ */
+
+/**
+ * @typedef {Object} UptimeEntry
+ * @property {string} date_time - ISO 8601 timestamp
+ * @property {number} uptime
+ */
+
+/**
+ * @typedef {Object} RevenueHistoryEntry
+ * @property {string} date_time - ISO 8601 timestamp
+ * @property {RevenueEntry} revenue
+ */
+
+/**
+ * @typedef {Object} Transaction
+ * @property {string} currency_type
+ * @property {string} date_time - ISO 8601 timestamp
+ * @property {string} address_name - Wallet identifier
+ * @property {string} subaccount_name
+ * @property {string} transaction_category - e.g. "Miner Revenue"
+ * @property {number} currency_amount - Amount in cryptocurrency
+ * @property {number} usd_equivalent - USD value
+ * @property {string} transaction_id - Unique ID
+ * @property {string} transaction_type - 'credit' or 'debit'
+ */
+
+/**
+ * @typedef {Object} WorkersResult
+ * @property {string} currency_type
+ * @property {Subaccount[]} subaccounts
+ * @property {number} total_active
+ * @property {number} total_inactive
+ * @property {LuxorWorker[]} workers
+ * @property {PaginationInfo} pagination
+ */
+
+/**
+ * @typedef {Object} LuxorSummary
+ * @property {string} currency_type
+ * @property {Subaccount[]} subaccounts
+ * @property {string} hashrate_5m
+ * @property {string} hashrate_1h
+ * @property {string} hashrate_24h
+ * @property {string} hashrate_stale_1h
+ * @property {string} hashrate_stale_24h
+ * @property {number} efficiency_5m - 0.0-1.0
+ * @property {number} uptime_24h - 0.0-1.0
+ * @property {number} active_miners
+ * @property {RevenueEntry[]} revenue_24h
+ * @property {RevenueEntry[]} revenue_all_time
+ * @property {BalanceEntry[]} balance
+ * @property {HashpriceEntry[]} hashprice
+ */
+
+/**
+ * @typedef {Object} LuxorWorker
+ * @property {string} currency_type
+ * @property {string} id
+ * @property {string} subaccount_name
+ * @property {string} name
+ * @property {string} firmware
+ * @property {number} hashrate
+ * @property {number} efficiency
+ * @property {number} stale_shares
+ * @property {number} rejected_shares
+ * @property {string} last_share_time - ISO 8601 timestamp
+ * @property {string} status - 'ACTIVE' | 'INACTIVE' | 'UNSPECIFIED'
+ */
+
+/**
+ * @typedef {Object} LuxorPoolHashrate
+ * @property {string} currency_type
+ * @property {string} hashrate_5m
+ * @property {string} hashrate_1h
+ * @property {string} hashrate_24h
+ */
+
+/**
+ * @typedef {Object} LuxorPoolStats
+ * @property {string} currency_type
+ * @property {string} hashrate_5m
+ * @property {string} hashrate_1h
+ * @property {string} hashrate_24h
+ * @property {string} active_workers_5m
+ * @property {string} hashprice
+ * @property {string} minimum_payment_threshold
+ */
+
+/**
+ * @typedef {Object} LuxorUptime
+ * @property {string} currency_type
+ * @property {string} start_date
+ * @property {string} end_date
+ * @property {string} tick_size
+ * @property {Subaccount[]} subaccounts
+ * @property {UptimeEntry[]} uptime
+ * @property {PaginationInfo} pagination
+ */
+
+/**
+ * @typedef {Object} LuxorRevenue
+ * @property {string} currency_type
+ * @property {string} start_date
+ * @property {string} end_date
+ * @property {Subaccount[]} subaccounts
+ * @property {RevenueHistoryEntry[]} revenue
+ */
+
+/**
+ * @typedef {Object} LuxorSubaccounts
+ * @property {Subaccount[]} subaccounts
+ * @property {PaginationInfo} pagination
+ */
+
+/**
  * Luxor Mining Pool API Client
  * @see https://app.luxor.tech/api
  */
@@ -46,10 +220,8 @@ class LuxorMinerPool {
 
   /**
    * Get summary statistics for the workspace
-   * @param {Object} options - Query options
-   * @param {string|string[]} [options.subaccountNames] - Subaccount names to filter by
-   * @param {string} [options.siteId] - Site ID to filter by
-   * @returns {Promise<Object>} Summary data
+   * @param {QueryOptions} [options] - Query options
+   * @returns {Promise<LuxorSummary>} Summary data
    */
   async getSummary (options = {}) {
     const params = {}
@@ -67,13 +239,8 @@ class LuxorMinerPool {
 
   /**
    * Get workers list with pagination support
-   * @param {Object} options - Query options
-   * @param {string|string[]} [options.subaccountNames] - Subaccount names to filter by
-   * @param {string} [options.siteId] - Site ID to filter by
-   * @param {string} [options.status] - Worker status filter (ACTIVE, INACTIVE, UNSPECIFIED)
-   * @param {number} [options.pageNumber] - Page number (1-indexed)
-   * @param {number} [options.pageSize] - Page size
-   * @returns {Promise<Object>} Workers data with pagination
+   * @param {QueryOptions & PaginatedOptions & {status?: string}} [options] - Query options
+   * @returns {Promise<WorkersResult>} Workers data with pagination
    */
   async getWorkers (options = {}) {
     const params = {
@@ -98,8 +265,8 @@ class LuxorMinerPool {
 
   /**
    * Get all workers by iterating through pages
-   * @param {Object} options - Query options
-   * @returns {Promise<Object>} All workers data
+   * @param {QueryOptions} [options] - Query options
+   * @returns {Promise<WorkersResult>} All workers data
    */
   async getAllWorkers (options = {}) {
     const allWorkers = []
@@ -141,8 +308,8 @@ class LuxorMinerPool {
 
   /**
    * Get active workers only
-   * @param {Object} options - Query options
-   * @returns {Promise<Object>} Active workers data
+   * @param {QueryOptions} [options] - Query options
+   * @returns {Promise<WorkersResult>} Active workers data
    */
   async getActiveWorkers (options = {}) {
     return this.getWorkers({ ...options, status: WORKER_STATUS.ACTIVE })
@@ -150,15 +317,8 @@ class LuxorMinerPool {
 
   /**
    * Get transactions with pagination support
-   * @param {Object} options - Query options
-   * @param {string} options.startDate - Start date (YYYY-MM-DD format)
-   * @param {string} options.endDate - End date (YYYY-MM-DD format)
-   * @param {string|string[]} [options.subaccountNames] - Subaccount names to filter by
-   * @param {string} [options.siteId] - Site ID to filter by
-   * @param {string} [options.transactionType] - Transaction type filter (credit, debit)
-   * @param {number} [options.pageNumber] - Page number (1-indexed)
-   * @param {number} [options.pageSize] - Page size
-   * @returns {Promise<Object>} Transactions data with pagination
+   * @param {DateRangeOptions & QueryOptions & PaginatedOptions & {transactionType?: string}} options - Query options
+   * @returns {Promise<{transactions: Transaction[], pagination: PaginationInfo}>} Transactions data with pagination
    */
   async getTransactions (options = {}) {
     if (!options.startDate || !options.endDate) {
@@ -189,36 +349,32 @@ class LuxorMinerPool {
 
   /**
    * Get all transactions by iterating through pages
-   * @param {Object} options - Query options
-   * @returns {Promise<Array>} All transactions
+   * @param {DateRangeOptions & QueryOptions & {transactionType?: string}} options - Query options
+   * @returns {Promise<Transaction[]>} All transactions
    */
   async getAllTransactions (options = {}) {
     const allTransactions = []
     let pageNumber = 1
 
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
+    let nextPageUrl = null
+    do {
       const result = await this.getTransactions({ ...options, pageNumber, pageSize: this.pageSize })
 
       if (result.transactions && result.transactions.length > 0) {
         allTransactions.push(...result.transactions)
       }
 
-      // Check if there are more pages
-      if (!result.pagination?.next_page_url) {
-        break
-      }
-
+      nextPageUrl = result.pagination?.next_page_url
       pageNumber++
-    }
+    } while (nextPageUrl !== null)
 
     return allTransactions
   }
 
   /**
    * Get pool hashrate statistics
-   * @param {Object} options - Query options
-   * @returns {Promise<Object>} Pool hashrate data
+   * @param {QueryOptions} [options] - Query options
+   * @returns {Promise<LuxorPoolHashrate>} Pool hashrate data
    */
   async getPoolHashrate (options = {}) {
     const params = {}
@@ -236,8 +392,8 @@ class LuxorMinerPool {
 
   /**
    * Get pool statistics
-   * @param {Object} options - Query options
-   * @returns {Promise<Object>} Pool stats data
+   * @param {QueryOptions} [options] - Query options
+   * @returns {Promise<LuxorPoolStats>} Pool stats data
    */
   async getPoolStats (options = {}) {
     const params = {}
@@ -254,43 +410,9 @@ class LuxorMinerPool {
   }
 
   /**
-   * Get hashrate efficiency data
-   * @param {Object} options - Query options
-   * @param {string} options.startDate - Start date (YYYY-MM-DD format)
-   * @param {string} options.endDate - End date (YYYY-MM-DD format)
-   * @param {string} [options.tickSize] - Tick size: 5m, 1h, 1d, 1w, 1M (default: 1d)
-   * @returns {Promise<Object>} Hashrate efficiency data
-   */
-  async getHashrateEfficiency (options = {}) {
-    if (!options.startDate || !options.endDate) {
-      throw new Error('ERR_DATE_RANGE_REQUIRED')
-    }
-
-    const params = {
-      start_date: options.startDate,
-      end_date: options.endDate,
-      tick_size: options.tickSize || '1d'
-    }
-
-    if (options.subaccountNames) {
-      params.subaccount_names = Array.isArray(options.subaccountNames)
-        ? options.subaccountNames.join(',')
-        : options.subaccountNames
-    }
-    if (options.siteId) {
-      params.site_id = options.siteId
-    }
-
-    return this._request(`/v2/pool/hashrate-efficiency/${this.currencyType}`, params)
-  }
-
-  /**
    * Get uptime statistics
-   * @param {Object} options - Query options
-   * @param {string} options.startDate - Start date (YYYY-MM-DD format)
-   * @param {string} options.endDate - End date (YYYY-MM-DD format)
-   * @param {string} [options.tickSize] - Tick size: 1d, 1w, 1M (default: 1d)
-   * @returns {Promise<Object>} Uptime data
+   * @param {DateRangeOptions & QueryOptions & {tickSize?: string}} options - Query options
+   * @returns {Promise<LuxorUptime>} Uptime data
    */
   async getUptime (options = {}) {
     if (!options.startDate || !options.endDate) {
@@ -317,8 +439,8 @@ class LuxorMinerPool {
 
   /**
    * Get revenue statistics
-   * @param {Object} options - Query options
-   * @returns {Promise<Object>} Revenue data
+   * @param {QueryOptions} [options] - Query options
+   * @returns {Promise<LuxorRevenue>} Revenue data
    */
   async getRevenue (options = {}) {
     const params = {}
@@ -336,7 +458,7 @@ class LuxorMinerPool {
 
   /**
    * Get subaccounts list
-   * @returns {Promise<Object>} Subaccounts data
+   * @returns {Promise<LuxorSubaccounts>} Subaccounts data
    */
   async getSubaccounts () {
     return this._request('/v2/pool/subaccounts')

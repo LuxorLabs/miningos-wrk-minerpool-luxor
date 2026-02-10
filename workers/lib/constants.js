@@ -1,10 +1,18 @@
 'use strict'
 
+/**
+ * @readonly
+ * @enum {string}
+ */
 const TRANSACTION_TYPES = {
   CREDIT: 'credit',
   DEBIT: 'debit'
 }
 
+/**
+ * @readonly
+ * @enum {string}
+ */
 const WORKER_STATUS = {
   ACTIVE: 'ACTIVE',
   INACTIVE: 'INACTIVE',
@@ -24,6 +32,10 @@ const BTC_SATS = 100000000 // 1 BTC = 100,000,000 satoshis
 
 const DEFAULT_PAGE_SIZE = 100
 
+/**
+ * @readonly
+ * @enum {{time: string, key: string}}
+ */
 const SCHEDULER_TIMES = {
   _1M: { time: '0 */1 * * * *', key: '1m' },
   _5M: { time: '0 */5 * * * *', key: '5m' },

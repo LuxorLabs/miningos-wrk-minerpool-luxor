@@ -2,20 +2,77 @@
 
 const { HOUR_MS, HOURS_24_MS, WORKER_STATUS } = require('./constants')
 
+/** @typedef {import('./luxor.minerpool').LuxorWorker} LuxorWorker */
+/** @typedef {import('./luxor.minerpool').LuxorSummary} LuxorSummary */
+/** @typedef {import('./luxor.minerpool').RevenueEntry} RevenueEntry */
+/** @typedef {import('./luxor.minerpool').BalanceEntry} BalanceEntry */
+/** @typedef {import('./luxor.minerpool').HashpriceEntry} HashpriceEntry */
+
+/**
+ * @typedef {Object} WorkerStats
+ * @property {string} id
+ * @property {string} name
+ * @property {string} username
+ * @property {number} online - 1 if active, 0 if inactive
+ * @property {string} last_updated
+ * @property {number} hashrate
+ * @property {number} hashrate_1h
+ * @property {number} hashrate_24h
+ * @property {number} hashrate_stale_1h
+ * @property {number} hashrate_stale_24h
+ * @property {number} stale_shares
+ * @property {number} rejected_shares
+ * @property {string} firmware
+ */
+
+/**
+ * @typedef {Object} PoolStats
+ * @property {number} timestamp
+ * @property {number} hashrate
+ * @property {number} hashrate_1h
+ * @property {number} hashrate_24h
+ * @property {number} hashrate_stale_1h
+ * @property {number} hashrate_stale_24h
+ * @property {number} efficiency
+ * @property {number} uptime_24h
+ * @property {number} active_workers_count
+ * @property {number} revenue_24h
+ * @property {number} revenue_all_time
+ * @property {number} balance
+ * @property {number} hashprice
+ * @property {Array} subaccounts
+ */
+
+/**
+ * @typedef {Object} MonthlyDateRange
+ * @property {number} startDate - Start of month in milliseconds
+ * @property {number} endDate - Start of next month in milliseconds
+ */
+
+/**
+ * @typedef {Object} TimeRange
+ * @property {number} start - Start timestamp in milliseconds
+ * @property {number} end - End timestamp in milliseconds
+ */
+
 /**
  * Transform Luxor worker data to MiningOS standard format
- * @param {Object} worker - Luxor worker object
- * @returns {Object} Normalized worker stats
+ * @param {LuxorWorker} worker - Luxor worker object
+ * @returns {WorkerStats} Normalized worker stats
  */
 function transformWorkerData (worker) {
   return {
     id: worker.id,
     name: worker.name,
-    subaccount_name: worker.subaccount_name,
+    username: worker.subaccount_name,
     online: worker.status === WORKER_STATUS.ACTIVE ? 1 : 0,
     last_updated: worker.last_share_time,
     hashrate: worker.hashrate || 0,
-    efficiency: worker.efficiency || 0,
+    hashrate_1h: 0,
+    hashrate_24h: 0,
+    hashrate_stale_1h: 0,
+    hashrate_stale_24h: 0,
+    // Extra fields
     stale_shares: worker.stale_shares || 0,
     rejected_shares: worker.rejected_shares || 0,
     firmware: worker.firmware || ''
@@ -24,8 +81,8 @@ function transformWorkerData (worker) {
 
 /**
  * Transform Luxor workers array to MiningOS format
- * @param {Array} workers - Array of Luxor workers
- * @returns {Array} Normalized workers array
+ * @param {LuxorWorker[]} workers - Array of Luxor workers
+ * @returns {WorkerStats[]} Normalized workers array
  */
 function getWorkersStats (workers) {
   if (!Array.isArray(workers)) return []
@@ -34,7 +91,7 @@ function getWorkersStats (workers) {
 
 /**
  * Extract total mining revenue from revenue array
- * @param {Array} revenueArray - Array of revenue objects from Luxor
+ * @param {RevenueEntry[]} revenueArray - Array of revenue objects from Luxor
  * @returns {number} Total mining revenue
  */
 function extractMiningRevenue (revenueArray) {
@@ -46,7 +103,7 @@ function extractMiningRevenue (revenueArray) {
 
 /**
  * Extract balance for a specific currency
- * @param {Array} balanceArray - Array of balance objects from Luxor
+ * @param {BalanceEntry[]} balanceArray - Array of balance objects from Luxor
  * @param {string} currencyType - Currency type to extract
  * @returns {number} Balance amount
  */
@@ -59,7 +116,7 @@ function extractBalance (balanceArray, currencyType = 'BTC') {
 
 /**
  * Extract hashprice for a specific currency
- * @param {Array} hashpriceArray - Array of hashprice objects from Luxor
+ * @param {HashpriceEntry[]} hashpriceArray - Array of hashprice objects from Luxor
  * @param {string} currencyType - Currency type to extract
  * @returns {number} Hashprice value
  */
@@ -72,9 +129,9 @@ function extractHashprice (hashpriceArray, currencyType = 'BTC') {
 
 /**
  * Transform Luxor summary to MiningOS stats format
- * @param {Object} summary - Luxor summary response
+ * @param {LuxorSummary} summary - Luxor summary response
  * @param {string} currencyType - Currency type
- * @returns {Object} Normalized stats object
+ * @returns {PoolStats} Normalized stats object
  */
 function transformSummaryToStats (summary, currencyType = 'BTC') {
   const revenue24h = extractMiningRevenue(summary.revenue_24h)
@@ -85,7 +142,10 @@ function transformSummaryToStats (summary, currencyType = 'BTC') {
   return {
     timestamp: Date.now(),
     hashrate: parseFloat(summary.hashrate_5m) || 0,
+    hashrate_1h: parseFloat(summary.hashrate_1h) || 0,
     hashrate_24h: parseFloat(summary.hashrate_24h) || 0,
+    hashrate_stale_1h: parseFloat(summary.hashrate_stale_1h) || 0,
+    hashrate_stale_24h: parseFloat(summary.hashrate_stale_24h) || 0,
     efficiency: summary.efficiency_5m || 0,
     uptime_24h: summary.uptime_24h || 0,
     active_workers_count: summary.active_miners || 0,
@@ -100,7 +160,7 @@ function transformSummaryToStats (summary, currencyType = 'BTC') {
 /**
  * Get monthly date ranges for the past N months
  * @param {number} months - Number of months to get
- * @returns {Object} Date ranges keyed by month-year
+ * @returns {Object<string, MonthlyDateRange>} Date ranges keyed by month-year
  */
 const getMonthlyDateRanges = (months) => {
   const dateRange = {}
@@ -153,7 +213,7 @@ const formatDateForApi = (timestamp) => {
  * @param {number} start - Start timestamp in milliseconds
  * @param {number} end - End timestamp in milliseconds
  * @param {boolean} isHourly - Use hourly intervals (default) or daily
- * @returns {Array} Array of { start, end } objects
+ * @returns {TimeRange[]} Array of { start, end } objects
  */
 const getTimeRanges = (start, end, isHourly = true) => {
   if (start >= end) return []

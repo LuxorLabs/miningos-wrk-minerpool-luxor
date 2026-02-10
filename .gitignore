@@ -143,4 +143,10 @@ dist
 # SvelteKit build / generate output
 .svelte-kit
 
+# Status, Store and Config
+status/
+store/
+config/common.json
+config/luxor.json
+
 # End of https://www.toptal.com/developers/gitignore/api/node

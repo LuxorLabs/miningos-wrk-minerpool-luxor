@@ -1,19 +1,22 @@
 {
   "name": "miningos-wrk-minerpool-luxor",
   "version": "0.0.1",
-  "description": "Luxor miner pool worker",
-  "keywords": [
-    "tether"
+  "description": "MiningOS Worker MinerPool Luxor",
+  "author": {
+    "name": "Luxor",
+    "email": "support@luxor.tech"
+  },
+  "maintainers": [
+    {
+      "name": "Eddie Wang",
+      "email": "eddie@luxor.tech"
+    },
+    {
+      "name": "Alexander Armua",
+      "email": "alexander.armua@luxor.tech"
+    }
   ],
-  "author": "Luxor",
-  "license": "Apache-2.0",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/LuxorLabs/miningos-wrk-minerpool-luxor.git"
-  },
-  "engine": {
-    "node": ">=20.0"
-  },
+  "keywords": ["tether", "miningos", "bitcoin", "mining", "luxor-pool"],
   "scripts": {
     "lint": "standard",
     "lint:fix": "standard --fix",
@@ -37,5 +40,13 @@
     "fastify": "4.29.1",
     "miningos-mock-control-service": "git+https://github.com/tetherto/miningos-mock-control-service.git",
     "standard": "17.1.2"
+  },
+  "engine": {
+    "node": ">=20.0"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LuxorLabs/miningos-wrk-minerpool-luxor.git"
   }
 }
